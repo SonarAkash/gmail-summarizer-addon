@@ -17,6 +17,8 @@ The add-on activates when a user opens an email, reads the email's content, and 
     * Enable the "Show 'appsscript.json' manifest file in editor" in Project Settings ⚙️.
     * Copy the contents of `appsscript.json` from this repository into your `appsscript.json` file.
 3.  **Get a Gemini API Key:** Create a free API key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+4. **Create Google Gloud account:** Before getting started create an account on google cloud and create a new project as
+it is required to test the addon, for more detail on how to set up the environment plz read [this](https://developers.google.com/workspace/add-ons/quickstart/cats-quickstart) article.
 4.  **Store the API Key:**
     * In your `Code.gs` file, paste your new API key into the `storeGeminiApiKey` function.
     * From the function dropdown, select `storeGeminiApiKey` and click **Run**.
