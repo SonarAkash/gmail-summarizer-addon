@@ -3,7 +3,7 @@
 This is a demo Google Workspace Add-on built for an internship assignment.
 
 
-![Working Demo](working-demo.gif)
+![Working Demo](working_video.gif)
 
 The add-on activates when a user opens an email, reads the email's content, and uses the Google Gemini API to generate a one or two-sentence summary, which is then displayed in the Gmail sidebar.
 
