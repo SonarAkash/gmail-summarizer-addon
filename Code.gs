@@ -3,197 +3,70 @@ function onGmailMessageOpen(e) {
   const message = GmailApp.getMessageById(messageId);
   const emailBody = message.getPlainBody();
   
-  if (!emailBody) {
-    retufunction onGmailMessageOpen(e) {
-  const messageId = e.gmail.messageId;
-  const message = GmailApp.getMessageById(messageId);
-  const emailBody = message.getPlainBody();
-
-  const globalTime = fetchGlobalTime();
-
+  const globalTime = fetchGlobalTimeWithBackup();
+  
   let summary = '';
   let error = null;
-  
+
   if (!emailBody || emailBody.trim() === '') {
     summary = "This email has no text content to summarize.";
-  }else{
+  } else {
     try {
-      const prompt = emailBody; 
-      summary = callGoogleGemini(prompt);
+      summary = callGoogleGeminiWithBackup(emailBody);
     } catch (err) {
-      Logger.log("Error in onGmailMessageOpen: " + err);
-      error = err.message;
+      console.error("All AI Models Failed: " + err);
+      summary = "⚠️ AI is currently busy. Please try again."; 
+      error = "Server overloaded.";
     }
   }
-  return createSummaryCard(summary, globalTime, error, messageId);
   
+  return createSummaryCard(summary, globalTime, error, messageId);
 }
 
 function onRetrySummarize(e) {
   const messageId = e.parameters.messageId;
   
   if (!messageId) {
-    const card = createSummaryCard("Error: Could not find message to retry.", fetchGlobalTime(), null, "0");
+    const card = createSummaryCard("Error: Could not find message.", fetchGlobalTimeWithBackup(), null, "0");
     return CardService.newNavigation().updateCard(card);
   }
 
   const message = GmailApp.getMessageById(messageId);
   const emailBody = message.getPlainBody();
   
-  const globalTime = fetchGlobalTime();
+  const globalTime = fetchGlobalTimeWithBackup();
   let newCard;
   
   if (!emailBody || emailBody.trim() === '') {
-    newCard = createSummaryCard("This email has no text content to summarize.", globalTime, null, messageId);
+    newCard = createSummaryCard("This email has no text content.", globalTime, null, messageId);
   } else {
     try {
-      const prompt = emailBody; 
-      const summary = callGoogleGemini(prompt);
+      const summary = callGoogleGeminiWithBackup(emailBody);
       newCard = createSummaryCard(summary, globalTime, null, messageId); 
-      
     } catch (err) {
-      Logger.log("Error in onRetrySummarize: " + err);
-      newCard = createSummaryCard("", globalTime, err.message, messageId); 
+      newCard = createSummaryCard(
+        "⚠️ Summary unavailable right now.", 
+        globalTime, 
+        "Still busy. Please wait 5s and retry.", 
+        messageId
+      ); 
     }
   }
   
   return CardService.newNavigation().updateCard(newCard);
 }
 
-
-function callGoogleGemini(prompt) {
-  const API_KEY = PropertiesService.getUserProperties().getProperty('GEMINI_KEY');
-  if (!API_KEY) {
-    throw new Error("No Api-key");
-  }
-  
-  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + API_KEY;
-  
-  const payload = {
-    'systemInstruction': {
-      'parts': [ 
-        { 'text': 'You are a helpful assistant. Summarize the following email in one or two concise sentences.' }
-      ]
-    },
-    'contents': [ 
-      { 'parts': [ { 'text': prompt } ] }
-    ]
-  };
-
-  const options = {
-    'method': 'post',
-    'contentType': 'application/json',
-    'payload': JSON.stringify(payload), 
-    'muteHttpExceptions': true
-  };
-
-  const response = UrlFetchApp.fetch(GEMINI_URL, options);
-  const responseText = response.getContentText();
-  const jsonResponse = JSON.parse(responseText);
-
-  if (jsonResponse.error) {
-    Logger.log("Google API Error: " + jsonResponse.error.message);
-    throw new Error("Google Error: " + jsonResponse.error.message);
-  }
-
-  if (jsonResponse.candidates && jsonResponse.candidates.length > 0 &&
-      jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts &&
-      jsonResponse.candidates[0].content.parts.length > 0) {
-        
-    const summary = jsonResponse.candidates[0].content.parts[0].text.trim();
-    return summary;
-  } else {
-    Logger.log("Google Error: " + responseText);
-    throw new Error("Google Error: Could not parse summary from API response.");
-  }
-}
-
-
-
-function createSummaryCard(summaryText, globalTimeText, errorText, messageId) {
-  const cardBuilder = CardService.newCardBuilder();
-  
-  if (!errorText) {
-    cardBuilder.setHeader(CardService.newCardHeader().setTitle('Email Summary'));
-    cardBuilder.addSection(
-      CardService.newCardSection()
-        .addWidget(
-          CardService.newTextParagraph()
-            .setText(summaryText)
-        )
-    );
-  }
-  
-  const replyInput = CardService.newTextInput()
-    .setFieldName("reply_content")
-    .setTitle("Draft a quick response");
-
-  const draftAction = CardService.newAction()
-    .setFunctionName('onDraftReply')
-    .setParameters({ messageId: messageId });
-
-  cardBuilder.addSection(
-    CardService.newCardSection()
-      .setHeader('Respond')
-      .addWidget(replyInput)
-      .addWidget(
-        CardService.newTextButton()
-          .setText('Create Draft')
-          .setOnClickAction(draftAction)
-      )
-  );
-
-  cardBuilder.addSection(
-    CardService.newCardSection()
-      .setHeader('Live Data')
-      .addWidget(
-        CardService.newTextParagraph()
-          .setText(globalTimeText)
-      )
-  );
-
-  if (errorText) {
-    cardBuilder.setHeader(CardService.newCardHeader().setTitle('Error'));
-    cardBuilder.addSection(
-      CardService.newCardSection()
-        .addWidget(
-          CardService.newTextParagraph()
-            .setText(errorText)
-        )
-    );
-
-    const retryAction = CardService.newAction()
-      .setFunctionName('onRetrySummarize')
-      .setParameters({ messageId: messageId });
-
-    cardBuilder.setFixedFooter(
-      CardService.newFixedFooter()
-        .setPrimaryButton(
-          CardService.newTextButton()
-            .setText('RETRY')
-            .setOnClickAction(retryAction)
-        )
-    );
-  }
-
-  return cardBuilder.build();
-}
-
-
 function onDraftReply(e) {
   const messageId = e.parameters.messageId;
-  
   const userReplyText = e.formInput.reply_content;
 
   if (!userReplyText || userReplyText.trim() === '') {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification()
-        .setText('Please type a reply first.'))
+      .setNotification(CardService.newNotification().setText('Please type a reply first.'))
       .build();
   }
   
   const message = GmailApp.getMessageById(messageId);
-  
   const draft = message.createDraftReply(userReplyText);
   
   return CardService.newComposeActionResponseBuilder()
@@ -202,203 +75,152 @@ function onDraftReply(e) {
 }
 
 
-function storeGeminiApiKey() {
-  const GEMINI_API_KEY = 'GEMINI_API_KEY'; 
-  
-  if (GEMINI_API_KEY === 'GEMINI_API_KEY') {
-    Logger.log('No Api-key');
-    return;
-  }
-  
-  try {
-    const userProperties = PropertiesService.getUserProperties();
-    userProperties.setProperty('GEMINI_KEY', GEMINI_API_KEY);
-    Logger.log('SUCCESS: Google Gemini API key has been stored.');
-  } catch (e) {
-    Logger.log('ERROR: Could not store API key. ' + e);
-  }
-}
-
-function checkGeminiApiKey() {
-  try {
-    const userProperties = PropertiesService.getUserProperties();
-    const storedKey = userProperties.getProperty('GEMINI_KEY');
-    
-    if (storedKey) {
-      Logger.log('SUCCESS: Gemini key is stored. It starts with: ' + storedKey.substring(0, 6));
-    } else {
-      Logger.log('FAILURE: No Gemini API key is stored.');
-    }
-  } catch (e) {
-    Logger.log('ERROR: Could not retrieve API key. ' + e);
-  }
-}
-
-
-
-function fetchGlobalTime() {
-  const TIME_URL = 'http://worldtimeapi.org/api/timezone/Etc/UTC';
-  
-  try {
-    const options = {
-      'method': 'get',
-      'contentType': 'application/json',
-      'muteHttpExceptions': true
-    };
-    
-    const response = UrlFetchApp.fetch(TIME_URL, options);
-    const responseText = response.getContentText();
-    const jsonResponse = JSON.parse(responseText);
-    
-    if (jsonResponse.error) {
-      throw new Error(jsonResponse.error);
-    }
-    
-    const dateTime = new Date(jsonResponse.datetime);
-    const formattedTime = 'Current UTC Time: ' + dateTime.toUTCString();
-    
-    return formattedTime;
-    
-  } catch (e) {
-    Logger.log('WorldTimeAPI Error: ' + e);
-    return 'Could not load global time.';
-  }
-}rn createSummaryCard("This email has no text content to summarize.", null);
-  }
-
-  try {
-    const prompt = "Summarize the following email in one or two sentences: \n\n" + emailBody;
-    const summary = callGoogleGemini(prompt);
-    return createSummaryCard(summary, null); 
-    
-  } catch (err) {
-    Logger.log("Error in onGmailMessageOpen: " + err);
-    return createSummaryCard(err.message, messageId);
-  }
-}
-
-function onRetrySummarize(e) {
-  const messageId = e.parameters.messageId; 
-  
-  if (!messageId) {
-    const card = createSummaryCard("Error: Could not find message to retry.", null);
-    return CardService.newNavigation().updateCard(card);
-  }
-
-  const message = GmailApp.getMessageById(messageId);
-  const emailBody = message.getPlainBody();
-  
-  let newCard;
-  try {
-    const prompt = "Summarize the following email in one or two sentences: \n\n" + emailBody;
-    const summary = callGoogleGemini(prompt);
-    newCard = createSummaryCard(summary, null);
-    
-  } catch (err) {
-    Logger.log("Error in onRetrySummarize: " + err);
-    newCard = createSummaryCard(err.message, messageId);
-  }
-  
-  return CardService.newNavigation().updateCard(newCard);
-}
-
-function callGoogleGemini(prompt) {
+function callGoogleGeminiWithBackup(prompt) {
   const API_KEY = PropertiesService.getUserProperties().getProperty('GEMINI_KEY');
-  if (!API_KEY) {
-    throw new Error("No Api-key");
+  if (!API_KEY) throw new Error("No Api-key");
+
+  const MODELS = [
+    'gemini-2.5-flash', // Priority 1: Fastest
+    'gemini-1.5-flash', // Priority 2: Stable
+    'gemini-1.0-pro'    // Priority 3: Legacy
+  ];
+
+  let lastError = null;
+
+  for (const model of MODELS) {
+    try {
+      Utilities.sleep(500);
+      return makeGeminiRequest(model, prompt, API_KEY);
+    } catch (e) {
+      console.warn(`Model ${model} failed, switching to next...`);
+      lastError = e;
+    }
   }
   
-  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + API_KEY;
+  throw new Error("All AI backups failed.");
+}
+
+function makeGeminiRequest(model, prompt, key) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   
+  const payload = {
+    'systemInstruction': {
+      'parts': [{ 'text': 'You are a helpful assistant. Summarize the following email in one or two concise sentences.' }]
+    },
+    'contents': [{ 'parts': [ { 'text': prompt } ] }]
+  };
+
   const options = {
     'method': 'post',
     'contentType': 'application/json',
-    'payload': JSON.stringify({
-      'contents': [
-        { 'parts': [ { 'text': prompt } ] }
-      ]
-    }),
+    'payload': JSON.stringify(payload),
     'muteHttpExceptions': true
   };
 
-  const response = UrlFetchApp.fetch(GEMINI_URL, options);
-  const responseText = response.getContentText();
-  const jsonResponse = JSON.parse(responseText);
+  const response = UrlFetchApp.fetch(url, options);
+  const json = JSON.parse(response.getContentText());
 
-  if (jsonResponse.error) {
-    Logger.log("Google API Error: " + jsonResponse.error.message);
-    throw new Error("Google Error: " + jsonResponse.error.message);
+  if (json.error) {
+    throw new Error(json.error.message);
   }
-
-  if (jsonResponse.candidates && jsonResponse.candidates.length > 0 &&
-      jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts &&
-      jsonResponse.candidates[0].content.parts.length > 0) {
-        
-    const summary = jsonResponse.candidates[0].content.parts[0].text.trim();
-    return summary;
-  } else {
-    Logger.log("Google Error: " + responseText);
-    throw new Error("Google Error: Could not parse summary from API response.");
+  
+  if (json.candidates && json.candidates[0].content) {
+    return json.candidates[0].content.parts[0].text.trim();
   }
+  throw new Error("Empty response");
 }
 
-function createSummaryCard(summaryText, messageId) {
-  const cardBuilder = CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader().setTitle('Email Summary'))
-    .addSection(
-      CardService.newCardSection()
-        .addWidget(
-          CardService.newTextParagraph()
-            .setText(summaryText)
-        )
+function fetchGlobalTimeWithBackup() {
+  try {
+    const url = 'http://worldtimeapi.org/api/timezone/Etc/UTC';
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (response.getResponseCode() === 200) {
+      const json = JSON.parse(response.getContentText());
+      const date = new Date(json.datetime);
+      return "UTC (API): " + date.toUTCString().replace('GMT', '');
+    }
+  } catch (e) {
+    console.warn("Time API failed, using system backup.");
+  }
+
+  const now = new Date();
+  return "UTC (System): " + now.toUTCString().replace('GMT', '');
+}
+
+
+function createSummaryCard(summaryText, globalTimeText, errorText, messageId) {
+  const card = CardService.newCardBuilder();
+  
+  const mainHeader = CardService.newCardHeader()
+    .setTitle('Gmail Summarizer')
+    .setImageStyle(CardService.ImageStyle.CIRCLE)
+    .setImageUrl("https://www.gstatic.com/images/icons/material/system/1x/auto_awesome_black_24dp.png");
+  
+  card.setHeader(mainHeader);
+
+  if (!errorText) {
+    card.addSection(CardService.newCardSection()
+      .setHeader("AI Summary") 
+      .addWidget(CardService.newTextParagraph().setText(summaryText))
     );
+  }
+  
+  const replyInput = CardService.newTextInput()
+    .setFieldName("reply_content")
+    .setTitle("Draft a quick response");
 
-  if (messageId) {
-    const retryAction = CardService.newAction()
-      .setFunctionName('onRetrySummarize')
-      .setParameters({messageId: messageId});
+  const draftAction = CardService.newAction().setFunctionName('onDraftReply').setParameters({ messageId: messageId });
+  
+  card.addSection(CardService.newCardSection()
+    .setHeader("Respond")
+    .addWidget(replyInput)
+    .addWidget(CardService.newTextButton()
+      .setText('Open Draft')
+      .setIcon(CardService.Icon.EMAIL)
+      .setOnClickAction(draftAction)
+    )
+  );
 
-    cardBuilder.setFixedFooter(
-      CardService.newFixedFooter()
-        .setPrimaryButton(
-          CardService.newTextButton()
-            .setText('RETRY')
-            .setOnClickAction(retryAction)
+  card.addSection(CardService.newCardSection()
+    .addWidget(
+      CardService.newDecoratedText()
+        .setText(globalTimeText)
+        .setTopLabel("Live Global Time")
+        .setStartIcon(
+          CardService.newIconImage()
+            .setIconUrl("https://www.gstatic.com/images/icons/material/system_gm/1x/schedule_black_24dp.png")
         )
+    )
+  );
+
+  if (errorText) {
+    const retryAction = CardService.newAction().setFunctionName('onRetrySummarize').setParameters({ messageId: messageId });
+    
+    card.addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText(errorText))
+      .addWidget(CardService.newTextButton()
+        .setText('Try Again')
+        .setOnClickAction(retryAction)
+      )
     );
   }
 
-  return cardBuilder.build();
+  return card.build();
 }
+
 
 function storeGeminiApiKey() {
   const GEMINI_API_KEY = 'GEMINI_API_KEY'; 
-  
-  if (GEMINI_API_KEY === 'GEMINI_API_KEY') {
-    Logger.log('No Api-key');
-    return;
-  }
-  
-  try {
-    const userProperties = PropertiesService.getUserProperties();
-    userProperties.setProperty('GEMINI_KEY', GEMINI_API_KEY);
-    Logger.log('SUCCESS: Google Gemini API key has been stored.');
-  } catch (e) {
-    Logger.log('ERROR: Could not store API key. ' + e);
-  }
+  if (GEMINI_API_KEY === 'GEMINI_API_KEY') { Logger.log('No Api-key'); return; }
+  PropertiesService.getUserProperties().setProperty('GEMINI_KEY', GEMINI_API_KEY);
+  Logger.log('Key stored.');
 }
 
 function checkGeminiApiKey() {
   try {
     const userProperties = PropertiesService.getUserProperties();
     const storedKey = userProperties.getProperty('GEMINI_KEY');
-    
-    if (storedKey) {
-      Logger.log('SUCCESS: Gemini key is stored. It starts with: ' + storedKey.substring(0, 6));
-    } else {
-      Logger.log('FAILURE: No Gemini API key is stored.');
-    }
-  } catch (e) {
-    Logger.log('ERROR: Could not retrieve API key. ' + e);
-  }
+    if (storedKey) { Logger.log('SUCCESS: Key stored.'); } 
+    else { Logger.log('FAILURE: No Key.'); }
+  } catch (e) { Logger.log('ERROR: ' + e); }
 }
